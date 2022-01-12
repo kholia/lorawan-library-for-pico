@@ -2,9 +2,9 @@
  * Copyright (c) 2021 Arm Limited and Contributors. All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
- * 
- * This example uses OTAA to join the LoRaWAN network and then sends the 
- * internal temperature sensors value up as an uplink message periodically 
+ *
+ * This example uses OTAA to join the LoRaWAN network and then sends the
+ * internal temperature sensors value up as an uplink message periodically
  * and the first byte of any uplink messages received controls the boards
  * built-in LED.
  */
@@ -19,11 +19,13 @@
 #include "pico/lorawan.h"
 #include "tusb.h"
 
-// edit with LoRaWAN Node Region and OTAA settings 
+// edit with LoRaWAN Node Region and OTAA settings
 #include "config.h"
 
-// pin configuration for SX1276 radio module
-const struct lorawan_sx1276_settings sx1276_settings = {
+/*
+ * Pin configuration for SX1276 radio module (default)
+ */
+const struct lorawan_sx12xx_settings sx12xx_settings = {
     .spi = {
         .inst = PICO_DEFAULT_SPI_INSTANCE,
         .mosi = PICO_DEFAULT_SPI_TX_PIN,
@@ -35,6 +37,22 @@ const struct lorawan_sx1276_settings sx1276_settings = {
     .dio0  = 7,
     .dio1  = 10
 };
+
+/*
+ * Configuration for SX1262 Waveshare module
+ */
+//const struct lorawan_sx12xx_settings sx12xx_settings = {
+//    .spi = {
+//        .inst = spi1,
+//        .mosi = 11,
+//        .miso = 12,
+//        .sck  = 10,
+//        .nss  = 3
+//    },
+//    .reset = 15,
+//    .busy = 2,
+//    .dio1  = 20
+//};
 
 // OTAA settings
 const struct lorawan_otaa_settings otaa_settings = {
@@ -60,7 +78,7 @@ int main( void )
     while (!tud_cdc_connected()) {
         tight_loop_contents();
     }
-    
+
     printf("Pico LoRaWAN - OTAA - Temperature + LED\n\n");
 
     // initialize the LED pin and internal temperature ADC
@@ -74,7 +92,7 @@ int main( void )
 
     // initialize the LoRaWAN stack
     printf("Initilizating LoRaWAN ... ");
-    if (lorawan_init_otaa(&sx1276_settings, LORAWAN_REGION, &otaa_settings) < 0) {
+    if (lorawan_init_otaa(&sx12xx_settings, LORAWAN_REGION, &otaa_settings) < 0) {
         printf("failed!!!\n");
         while (1) {
             tight_loop_contents();
@@ -100,7 +118,7 @@ int main( void )
 
         // send the internal temperature as a (signed) byte in an unconfirmed uplink message
         printf("sending internal temperature: %d °C (0x%02x)... ", adc_temperature_byte, adc_temperature_byte);
-        if (lorawan_send_unconfirmed(&adc_temperature_byte, sizeof(adc_temperature_byte), 2) < 0) {
+        if (lorawan_send_confirmed(&adc_temperature_byte, sizeof(adc_temperature_byte), 2) < 0) {
             printf("failed!!!\n");
         } else {
             printf("success!\n");
@@ -110,7 +128,7 @@ int main( void )
         if (lorawan_process_timeout_ms(30000) == 0) {
             // check if a downlink message was received
             receive_length = lorawan_receive(receive_buffer, sizeof(receive_buffer), &receive_port);
-            if (receive_length > -1) {
+            if (receive_length > 0) {
                 printf("received a %d byte message on port %d: ", receive_length, receive_port);
 
                 for (int i = 0; i < receive_length; i++) {
@@ -145,7 +163,7 @@ float internal_temperature_get()
     // convert the raw ADC value to a voltage
     float adc_voltage = adc_raw * v_ref / 4095.0f;
 
-    // convert voltage to temperature, using the formula from 
+    // convert voltage to temperature, using the formula from
     // section 4.9.4 in the RP2040 datasheet
     //   https://datasheets.raspberrypi.org/rp2040/rp2040-datasheet.pdf
     float adc_temperature = 27.0 - ((adc_voltage - 0.706) / 0.001721);

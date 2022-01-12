@@ -1,7 +1,7 @@
 /*!
  * \file      lorawan.c
  *
- * \brief     Implements the LoRaMac layer handling. 
+ * \brief     Implements the LoRaMac layer handling.
  *            Provides the possibility to register applicative packages.
  *
  * \remark    This file is based on
@@ -32,7 +32,13 @@
 
 #include "board.h"
 #include "rtc-board.h"
+
+#if defined sx1276
 #include "sx1276-board.h"
+#elif defined sx126x
+#include "sx126x-board.h"
+#include "pico/board-config.h"
+#endif
 
 #include "../../periodic-uplink-lpp/firmwareVersion.h"
 #include "Commissioning.h"
@@ -57,7 +63,7 @@
 /*!
  * Default datarate
  *
- * \remark Please note that LORAWAN_DEFAULT_DATARATE is used only when ADR is disabled 
+ * \remark Please note that LORAWAN_DEFAULT_DATARATE is used only when ADR is disabled
  */
 #define LORAWAN_DEFAULT_DATARATE                    DR_0
 
@@ -159,7 +165,7 @@ static LmhpComplianceParams_t LmhpComplianceParams =
 
 /*!
  * Indicates if LoRaMacProcess call is pending.
- * 
+ *
  * \warning If variable is equal to 0 then the MCU can be set in low power mode
  */
 static volatile uint8_t IsMacProcessPending = 0;
@@ -179,7 +185,7 @@ static LmHandlerAppData_t AppRxData =
     .Port = 0,
 };
 
-static bool Debug = false;
+static bool Debug = true;
 
 extern void EepromMcuInit();
 extern uint8_t EepromMcuFlush();
@@ -199,24 +205,25 @@ const char* lorawan_default_dev_eui(char* dev_eui)
     return dev_eui;
 }
 
-int lorawan_init(const struct lorawan_sx1276_settings* sx1276_settings, LoRaMacRegion_t region)
+static int lorawan_init(const struct lorawan_sx12xx_settings* sx12xx_settings, LoRaMacRegion_t region)
 {
     EepromMcuInit();
 
     RtcInit();
+#if defined sx1276
     SpiInit(
         &SX1276.Spi,
-        (SpiId_t)((sx1276_settings->spi.inst == spi0) ? 0 : 1),
-        sx1276_settings->spi.mosi /*MOSI*/,
-        sx1276_settings->spi.miso /*MISO*/,
-        sx1276_settings->spi.sck /*SCK*/, 
+        (SpiId_t)((sx12xx_settings->spi.inst == spi0) ? 0 : 1),
+        sx12xx_settings->spi.mosi /*MOSI*/,
+        sx12xx_settings->spi.miso /*MISO*/,
+        sx12xx_settings->spi.sck /*SCK*/,
         NC
     );
 
-    SX1276.Spi.Nss.pin = sx1276_settings->spi.nss;
-    SX1276.Reset.pin = sx1276_settings->reset;
-    SX1276.DIO0.pin = sx1276_settings->dio0;
-    SX1276.DIO1.pin = sx1276_settings->dio1;
+    SX1276.Spi.Nss.pin = sx12xx_settings->spi.nss;
+    SX1276.Reset.pin = sx12xx_settings->reset;
+    SX1276.DIO0.pin = sx12xx_settings->dio0;
+    SX1276.DIO1.pin = sx12xx_settings->dio1;
 
     SX1276IoInit();
 
@@ -224,6 +231,35 @@ int lorawan_init(const struct lorawan_sx1276_settings* sx1276_settings, LoRaMacR
     if (SX1276Read(REG_LR_VERSION) != 0x12) {
         return -1;
     }
+
+#elif defined sx126x
+    Gpio_t gpio_busy;
+    Gpio_t gpio_dio1;
+    Gpio_t gpio_reset;
+    Gpio_t gpio_nss;
+
+    Spi_t spi1_t;
+
+    gpio_busy.pin = RADIO_BUSY;
+    gpio_dio1.pin = RADIO_DIO_1;
+    gpio_reset.pin = RADIO_RESET;
+    gpio_nss.pin = RADIO_NSS;
+    spi1_t.Nss = gpio_nss;
+    // raspberry pi pico spi1
+    spi1_t.SpiId = SPI_2;
+
+    SX126x.BUSY = gpio_busy;
+    SX126x.DIO1 = gpio_dio1;
+    SX126x.Reset = gpio_reset;
+    SX126x.Spi = spi1_t;
+    SpiInit( &SX126x.Spi, SPI_2, RADIO_MOSI, RADIO_MISO, RADIO_SCLK, NC );
+
+    SX126x.Spi.Nss.pin = sx12xx_settings->spi.nss;
+    SX126x.Reset.pin = sx12xx_settings->reset;
+    SX126x.DIO1.pin = sx12xx_settings->dio1;
+
+    SX126xIoInit();
+#endif
 
     LmHandlerParams.Region = region;
 
@@ -242,20 +278,20 @@ int lorawan_init(const struct lorawan_sx1276_settings* sx1276_settings, LoRaMacR
     return 0;
 }
 
-int lorawan_init_abp(const struct lorawan_sx1276_settings* sx1276_settings, LoRaMacRegion_t region, const struct lorawan_abp_settings* abp_settings)
+int lorawan_init_abp(const struct lorawan_sx12xx_settings* sx12xx_settings, LoRaMacRegion_t region, const struct lorawan_abp_settings* abp_settings)
 {
     AbpSettings = abp_settings;
     OtaaSettings = NULL;
 
-    return lorawan_init(sx1276_settings, region);
+    return lorawan_init(sx12xx_settings, region);
 }
 
-int lorawan_init_otaa(const struct lorawan_sx1276_settings* sx1276_settings, LoRaMacRegion_t region, const struct lorawan_otaa_settings* otaa_settings)
+int lorawan_init_otaa(const struct lorawan_sx12xx_settings* sx12xx_settings, LoRaMacRegion_t region, const struct lorawan_otaa_settings* otaa_settings)
 {
     AbpSettings = NULL;
     OtaaSettings = otaa_settings;
 
-    return lorawan_init(sx1276_settings, region);
+    return lorawan_init(sx12xx_settings, region);
 }
 
 int lorawan_join()
@@ -298,7 +334,7 @@ int lorawan_process_timeout_ms(uint32_t timeout_ms)
     absolute_time_t timeout_time = make_timeout_time_ms(timeout_ms);
 
     bool joined = lorawan_is_joined();
-    
+
     do {
         lorawan_process();
 
@@ -308,7 +344,7 @@ int lorawan_process_timeout_ms(uint32_t timeout_ms)
             return 0;
         }
     } while (!best_effort_wfe_or_timeout(timeout_time));
-    
+
     return 1; // timed out
 }
 
@@ -321,6 +357,21 @@ int lorawan_send_unconfirmed(const void* data, uint8_t data_len, uint8_t app_por
     appData.Buffer = (uint8_t*)data;
 
     if (LmHandlerSend(&appData, LORAMAC_HANDLER_UNCONFIRMED_MSG) != LORAMAC_HANDLER_SUCCESS) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int lorawan_send_confirmed(const void* data, uint8_t data_len, uint8_t app_port)
+{
+    LmHandlerAppData_t appData;
+
+    appData.Port = app_port;
+    appData.BufferSize = data_len;
+    appData.Buffer = (uint8_t*)data;
+
+    if (LmHandlerSend(&appData, LORAMAC_HANDLER_CONFIRMED_MSG) != LORAMAC_HANDLER_SUCCESS) {
         return -1;
     }
 
@@ -419,9 +470,7 @@ static void OnNetworkParametersChange( CommissioningParams_t* params )
 
             for (int i = 0; i < 4; i++) {
                 int b;
-
                 sscanf(device_address + i * 2, "%2hhx", &b);
-
                 params->DevAddr = (params->DevAddr << 8) | b;
             }
         } else {
@@ -441,9 +490,7 @@ static void OnNetworkParametersChange( CommissioningParams_t* params )
 
         for (int i = 0; i < 8; i++) {
             int b;
-
             sscanf(device_eui + i * 2, "%2x", &b);
-
             deviceEui[i] = b;
         }
 
@@ -458,9 +505,7 @@ static void OnNetworkParametersChange( CommissioningParams_t* params )
 
         for (int i = 0; i < 8; i++) {
             int b;
-
             sscanf(app_eui + i * 2, "%2x", &b);
-
             joinEui[i] = b;
         }
 
@@ -475,9 +520,7 @@ static void OnNetworkParametersChange( CommissioningParams_t* params )
 
         for (int i = 0; i < 16; i++) {
             int b;
-
             sscanf(app_key + i * 2, "%2x", &b);
-
             appKey[i] = b;
         }
 
@@ -495,9 +538,7 @@ static void OnNetworkParametersChange( CommissioningParams_t* params )
 
         for (int i = 0; i < 16; i++) {
             int b;
-
             sscanf(app_session_key + i * 2, "%2x", &b);
-
             appSessionKey[i] = b;
         }
 
@@ -511,9 +552,7 @@ static void OnNetworkParametersChange( CommissioningParams_t* params )
 
         for (int i = 0; i < 16; i++) {
             int b;
-
             sscanf(network_session_key + i * 2, "%2x", &b);
-
             networkSessionKey[i] = b;
         }
 
@@ -535,17 +574,15 @@ static void OnNetworkParametersChange( CommissioningParams_t* params )
 
         for (int i = 0; i < 6; i++) {
             int b[2];
-
             sscanf(channel_mask + i * 4 + 0, "%2x", &b[0]);
             sscanf(channel_mask + i * 4 + 2, "%2x", &b[1]);
-
             channelMask[i] = (b[0] << 8) | b[1];
         }
 
         mibReq.Type = MIB_CHANNELS_MASK;
         mibReq.Param.ChannelsMask = channelMask;
         LoRaMacMibSetRequestConfirm( &mibReq );
-        
+
         mibReq.Type = MIB_CHANNELS_DEFAULT_MASK;
         mibReq.Param.ChannelsDefaultMask = channelMask;
         LoRaMacMibSetRequestConfirm( &mibReq );
@@ -601,7 +638,8 @@ static void OnRxData( LmHandlerAppData_t* appData, LmHandlerRxParams_t* params )
 
     memcpy(AppRxData.Buffer, appData->Buffer, appData->BufferSize);
     AppRxData.BufferSize = appData->BufferSize;
-    AppRxData.Port = appData->Port;
+    // AppRxData.Port = appData->Port;
+    AppRxData.Port = 1; // dirty hack
 }
 
 static void OnClassChange( DeviceClass_t deviceClass )

@@ -17,7 +17,7 @@ extern "C" {
 
 #include "LoRaMac.h"
 
-struct lorawan_sx1276_settings {
+struct lorawan_sx12xx_settings {
     struct {
         spi_inst_t* inst;
         uint mosi;
@@ -26,6 +26,7 @@ struct lorawan_sx1276_settings {
         uint nss;
     } spi;
     uint reset;
+    uint busy;
     uint dio0;
     uint dio1;
 };
@@ -46,11 +47,9 @@ struct lorawan_otaa_settings {
 
 const char* lorawan_default_dev_eui(char* dev_eui);
 
-int lorawan_init(const struct lorawan_sx1276_settings* sx1276_settings, LoRaMacRegion_t region);
-
-int lorawan_init_abp(const struct lorawan_sx1276_settings* sx1276_settings, LoRaMacRegion_t region, const struct lorawan_abp_settings* abp_settings);
-
-int lorawan_init_otaa(const struct lorawan_sx1276_settings* sx1276_settings, LoRaMacRegion_t region, const struct lorawan_otaa_settings* otaa_settings);
+static int lorawan_init(const struct lorawan_sx12xx_settings* sx12xx_settings, LoRaMacRegion_t region);
+int lorawan_init_abp(const struct lorawan_sx12xx_settings* sx12xx_settings, LoRaMacRegion_t region, const struct lorawan_abp_settings* abp_settings);
+int lorawan_init_otaa(const struct lorawan_sx12xx_settings* sx12xx_settings, LoRaMacRegion_t region, const struct lorawan_otaa_settings* otaa_settings);
 
 int lorawan_join();
 
@@ -61,6 +60,8 @@ int lorawan_process();
 int lorawan_process_timeout_ms(uint32_t timeout_ms);
 
 int lorawan_send_unconfirmed(const void* data, uint8_t data_len, uint8_t app_port);
+
+int lorawan_send_confirmed(const void* data, uint8_t data_len, uint8_t app_port);
 
 int lorawan_receive(void* data, uint8_t data_len, uint8_t* app_port);
 
